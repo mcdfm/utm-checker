@@ -10,6 +10,9 @@
     <h3 style="text-align: center; margin-bottom: 20px;">Auswertung der UTM-Parameter</h3>
     <div id="utm-text" style="background: #f5f5f5; border: 1px solid #ccc; padding: 20px; border-radius: 5px; color: #333; line-height: 1.6; width: 100%; max-width: 600px; margin: 0 auto; font-family: Arial, sans-serif;">
         <!-- Hier wird der Text dynamisch eingefügt -->
+        <button id="copy-button" style="display: none; background: #28a745; color: #fff; border: none; padding: 8px 16px; margin-top: 15px; cursor: pointer; border-radius: 5px; font-size: 14px;">
+            <span class="button-text">In die Zwischenablage kopieren</span>
+        </button>
     </div>
 </div>
 
@@ -49,7 +52,36 @@ document.getElementById('utm-form').addEventListener('submit', async (event) => 
             humanReadableText += '<p style="color: red; font-weight: bold; margin-top: 10px;">' + result.warning + '</p>';
         }
 
+        // Add copy button to the content
+        humanReadableText += '<button id="copy-button" style="display: block; background: #28a745; color: #fff; border: none; padding: 8px 16px; margin-top: 15px; cursor: pointer; border-radius: 5px; font-size: 14px;"><span class="button-text">In die Zwischenablage kopieren</span></button>';
+
         document.getElementById('utm-text').innerHTML = humanReadableText;
+        
+        // Add event listener to the copy button
+        document.getElementById('copy-button').addEventListener('click', async () => {
+            // Get the text content without HTML tags, excluding the button text
+            const textToCopy = document.getElementById('utm-text').innerText
+                .replace('In die Zwischenablage kopieren', '')
+                .replace('Kopiert!', '')
+                .trim();
+            
+            try {
+                await navigator.clipboard.writeText(textToCopy);
+                const buttonText = document.querySelector('.button-text');
+                buttonText.textContent = 'Kopiert!';
+                document.getElementById('copy-button').style.background = '#218838';
+                
+                // Reset button text after 2 seconds
+                setTimeout(() => {
+                    buttonText.textContent = 'In die Zwischenablage kopieren';
+                    document.getElementById('copy-button').style.background = '#28a745';
+                }, 2000);
+            } catch (err) {
+                console.error('Failed to copy text: ', err);
+                document.getElementById('copy-button').textContent = 'Fehler beim Kopieren';
+                document.getElementById('copy-button').style.background = '#dc3545';
+            }
+        });
 
     } catch (error) {
         // Allgemeiner Fehler (z. B. Netzwerkprobleme)
