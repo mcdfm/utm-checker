@@ -20,7 +20,7 @@ with open('sources.json', 'r') as file:
 #response = requests.get(url)
 #source_categories = response.json()
 
-app = FastAPI()
+app = FastAPI() 
 
 # CORS Middleware hinzufügen
 app.add_middleware(
@@ -80,6 +80,8 @@ def get_channel(
         return "Organic Video"
     if category == "SOURCE_CATEGORY_SEARCH" or um == "organic":
         return "Organic Search"
+    if um in ["display", "banner", "expandable", "interstitial", "cpm"]:
+        return "Display"
     if um in ["referral", "app", "link"]:
         return "Referral"
     if re.match(r'^(email|e-mail|e_mail|e mail)$', us, re.IGNORECASE) or re.match(r'^(email|e-mail|e_mail|e mail)$', um, re.IGNORECASE):
