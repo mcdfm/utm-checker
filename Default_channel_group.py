@@ -1,42 +1,48 @@
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi import Request
-from pydantic import BaseModel, validator
-from fastapi.responses import JSONResponse
+import os
+from pathlib import Path
 import re
 import uvicorn
 import requests
-import urllib.parse
+from urllib.parse import urlparse, unquote  # Korrekter Import für die benötigten Funktionen
 import json
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi import Request
+from pydantic import BaseModel, field_validator
+from fastapi.responses import JSONResponse
 
-
-with open('sources.json', 'r') as file:
-    source_categories = json.load(file)
-
-
-
-# JSON-Datei mit Kategorien laden
-#url = "https://frankmickeler.com/custom-non-wp/sources.json"
-#response = requests.get(url)
-#source_categories = response.json()
+# Sicherere JSON-Datei-Ladung
+try:
+    sources_path = Path('sources.json')
+    if not sources_path.exists():
+        raise FileNotFoundError("sources.json nicht gefunden")
+        
+    with open(sources_path, 'r', encoding='utf-8') as file:
+        source_categories = json.load(file)
+except Exception as e:
+    print(f"Fehler beim Laden von sources.json: {e}")
+    source_categories = {}  # Fallback leeres Dict
 
 app = FastAPI() 
 
 # CORS Middleware hinzufügen
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://frankmickeler.com"],  # Deine spezifische Domain hier angeben
+    allow_origins=[
+        "https://frankmickeler.com",
+        "http://localhost:3000",  # Für lokale Entwicklung
+    ],
     allow_credentials=True,
-    allow_methods=["*"],  # Erlaubt alle HTTP-Methoden (POST, GET, etc.)
-    allow_headers=["*"],  # Erlaubt alle Header
+    allow_methods=["GET", "POST"],  # Nur benötigte Methoden erlauben
+    allow_headers=["Content-Type"],  # Nur benötigte Header erlauben
 )
 
 paid_medium_regex = re.compile(r'^(.*cp.*|ppc|retargeting|paid.*)$', re.IGNORECASE)
 
 # Channel Rules (Fallback):
 channel_rules = [
-    # Direct: source = direct, medium = none
-    (r'.*', r'^direct$', r'^none$', r'.*', 'Direct'),
+    # Direct: source = direct oder none, medium = none
+    (r'.*', r'^(direct|none)$', r'^none$', r'.*', 'Direct'),
     # Cross-network
     (r'.*', r'.*', r'.*', r'.*cross-network.*', 'Cross-network'),
     # Paid Shopping (Fallback über Kampagnennamen + Medium)
@@ -78,10 +84,11 @@ def get_channel(
         return "Organic Social"
     if (category == "SOURCE_CATEGORY_VIDEO" and not paid_medium_regex.match(um)) or re.match(r'.*video.*', um, re.IGNORECASE):
         return "Organic Video"
-    if category == "SOURCE_CATEGORY_SEARCH" or um == "organic":
-        return "Organic Search"
+    # Display vor Organic Search
     if um in ["display", "banner", "expandable", "interstitial", "cpm"]:
         return "Display"
+    if category == "SOURCE_CATEGORY_SEARCH" or um == "organic":
+        return "Organic Search"
     if um in ["referral", "app", "link"]:
         return "Referral"
     if re.match(r'^(email|e-mail|e_mail|e mail)$', us, re.IGNORECASE) or re.match(r'^(email|e-mail|e_mail|e mail)$', um, re.IGNORECASE):
@@ -109,13 +116,23 @@ def get_channel(
 class UTMParams(BaseModel):
     url: str
 
-    @validator("url", pre=True)
-    def add_protocol_if_missing(cls, value):
-        from urllib.parse import urlparse
-        parsed = urlparse(value)
-        if not parsed.scheme:  # Kein Protokoll vorhanden
+    @field_validator("url")
+    def validate_url(cls, value):
+        if len(value) > 2000:
+            raise ValueError("URL ist zu lang (max. 2000 Zeichen)")
+        
+        # Protokoll hinzufügen wenn nötig
+        if not value.startswith(('http://', 'https://')):
             value = "https://" + value
-            print(f"Protokoll hinzugefügt: {value}")  # Debugging message
+
+        # Basis-URL-Validierung
+        try:
+            parsed = urlparse(value)
+            if not all([parsed.scheme, parsed.netloc]):
+                raise ValueError
+        except Exception:
+            raise ValueError("Ungültige URL-Format")
+            
         return value
 
 
@@ -130,41 +147,43 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 def read_root():
     return {"message": "UTM Checker is running!"}
 
-from urllib.parse import urlparse
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse
-import urllib.parse
-
-app = FastAPI()
-
 @app.post("/check_utm")
 async def check_utm(params: UTMParams):
     try:
-        print("Received URL:", params.url)  # Debugging message
+        print("Received URL:", params.url)
         url_string = str(params.url)
 
-        # **URL-Validierung**
+        # URL-Validierung
         parsed_url = urlparse(url_string)
         if not parsed_url.scheme or not parsed_url.netloc:
             raise HTTPException(status_code=400, detail="Ungültige URL. Bitte geben Sie eine vollständige URL mit http/https an.")
-        if len(url_string) > 2000:  # Beschränke die maximale Länge der URL
-            raise HTTPException(status_code=400, detail="Die URL ist zu lang (max. 2000 Zeichen).")
+        
+        # Verbesserte Behandlung leerer Query-Parameter
+        url_query = parsed_url.query
+        if not url_query:
+            return JSONResponse(content={
+                "utm_source": "none",
+                "utm_medium": "none",
+                "utm_campaign": "none",
+                "channel": get_channel(None, None, None),
+                "warning": "Keine UTM-Parameter gefunden"
+            })
 
-        # Split the URL to get query parameters
-        url_query = parsed_url.query  # Nutze die `query`-Eigenschaft von `urlparse`
-        print("Extracted query string:", url_query)  # Debugging message
-        utm_params = dict(param.split('=', 1) for param in url_query.split('&') if '=' in param)
-        print("Extracted utm_params:", utm_params)  # Debugging message
+        # Sicherere Parameter-Extraktion
+        try:
+            utm_params = dict(param.split('=', 1) for param in url_query.split('&') if '=' in param)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Fehler beim Parsen der URL-Parameter")
 
         # URL-Parameter dekodieren
         raw_utm_source = utm_params.get('utm_source', None)
-        utm_source = urllib.parse.unquote(raw_utm_source) if raw_utm_source else None
+        utm_source = unquote(raw_utm_source) if raw_utm_source else None
         print("Decoded utm_source:", utm_source)  # Debugging message
         raw_utm_medium = utm_params.get('utm_medium', None)
-        utm_medium = urllib.parse.unquote(raw_utm_medium) if raw_utm_medium else None
+        utm_medium = unquote(raw_utm_medium) if raw_utm_medium else None
         print("Decoded utm_medium:", utm_medium)  # Debugging message
         raw_utm_campaign = utm_params.get('utm_campaign', None)
-        utm_campaign = urllib.parse.unquote(raw_utm_campaign) if raw_utm_campaign else None
+        utm_campaign = unquote(raw_utm_campaign) if raw_utm_campaign else None
         print("Decoded utm_campaign:", utm_campaign)  # Debugging message
 
         # Prüfen auf Anführungszeichen in den Parametern
