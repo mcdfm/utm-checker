@@ -62,6 +62,15 @@ def get_channel(
 
     category = source_categories.get(us.lower())
 
+    # Paid Shopping Regel nach Google Analytics 4: 
+    # ENTWEDER: Shopping-Quelle (z.B. Amazon) UND paid medium (z.B. cpc)
+    # ODER: Kampagnenname enthält "shop/shopping" UND paid medium
+    # Beispiel 1: source=amazon.com, medium=cpc -> Paid Shopping
+    # Beispiel 2: campaign=summer_shop_2024, medium=paid -> Paid Shopping
+    if (category == "SOURCE_CATEGORY_SHOPPING" and paid_medium_regex.match(um)) or \
+       (re.match(r'^(.*(([^a-df-z]|^)shop|shopping).*)$', uc, re.IGNORECASE) and paid_medium_regex.match(um)):
+        return "Paid Shopping"
+
     # 1. Spezifische Paid-Kategorien prüfen
     if category == "SOURCE_CATEGORY_SEARCH" and paid_medium_regex.match(um):
         return "Paid Search"
@@ -69,16 +78,20 @@ def get_channel(
         return "Paid Social"
     if category == "SOURCE_CATEGORY_VIDEO" and paid_medium_regex.match(um):
         return "Paid Video"
-    if category == "SOURCE_CATEGORY_SHOPPING" and paid_medium_regex.match(um):
-        return "Paid Shopping"
 
     # 2. Paid Other als Fallback prüfen
     # Greift nur, wenn Medium paid ist und keine spezifische Paid-Kategorie zutraf
     if paid_medium_regex.match(um):
         return "Paid Other"
 
-    # 3. Weitere Regeln (Organic, Referral, etc.)
-    if (category == "SOURCE_CATEGORY_SHOPPING" and not paid_medium_regex.match(um)) or re.match(r'^(.*(([^a-df-z]|^)shop|shopping).*)$', uc, re.IGNORECASE):
+    # Organic Shopping Regel nach Google Analytics 4:
+    # ENTWEDER: Shopping-Quelle UND KEIN paid medium
+    # ODER: Kampagnenname enthält "shop/shopping" UND KEIN paid medium
+    # Beispiel 1: source=amazon.com, medium=referral -> Organic Shopping
+    # Beispiel 2: campaign=summer_shop_2024, medium=organic -> Organic Shopping
+    # Wichtig: Bei Shopping-Kampagnenname mit paid medium greift die Paid Shopping Regel
+    if (category == "SOURCE_CATEGORY_SHOPPING" and not paid_medium_regex.match(um)) or \
+       (re.match(r'^(.*(([^a-df-z]|^)shop|shopping).*)$', uc, re.IGNORECASE) and not paid_medium_regex.match(um)):
         return "Organic Shopping"
     if (category == "SOURCE_CATEGORY_SOCIAL" and not paid_medium_regex.match(um)) or um in ["social", "social-network", "social-media", "sm", "social network", "social media"]:
         return "Organic Social"
